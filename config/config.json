@@ -1,6 +1,6 @@
 {
     "planilha": "S:/SCANNER FISCAL/data (6).xlsx",
-    "pdfs": "C:/Users/Henri.Souza/Desktop/Henri/automacoes/PDF",
-    "xml": "C:/Users/Henri.Souza/Downloads/nfe_xml_20260107091335",
-    "saida": "C:/Users/Henri.Souza/Desktop/Henri/automacoes/teste"
+    "pdfs": "C:/Users/Henri.Souza/Desktop/Henri/automacoes/Rateio/PDF",
+    "xml": "Z:/CONTABILIDADE/FISCAL/Adimax/00 - Compartilhamentos Fiscais/18. XML CT-e (Rateio)/UN_FEIRA_DE_SANTANA-BA",
+    "saida": "C:/Users/Henri.Souza/Desktop/Henri/automacoes/Aglutinação Automática/Saídas"
 }

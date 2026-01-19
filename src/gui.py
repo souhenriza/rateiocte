@@ -13,9 +13,8 @@ from tkinter.scrolledtext import ScrolledText
 from PIL import Image, ImageTk
 
 from .rateio import processar
-from .config import carregar_config, salvar_config
-
-
+import src.config as cfg_mod
+    
 # =====================================================
 # CONSTANTES VISUAIS / ASSETS
 # =====================================================
@@ -184,19 +183,20 @@ class RateioGUI:
     # =====================================================
 
     def _carregar_config_gui(self):
-        cfg = carregar_config()
+        cfg = cfg_mod.carregar_config()
         self.v_planilha.set(cfg.get("planilha", ""))
         self.v_pdfs.set(cfg.get("pdfs", ""))
         self.v_xml.set(cfg.get("xml", ""))
         self.v_saida.set(cfg.get("saida", ""))
 
     def _salvar_config_gui(self):
-        salvar_config({
+        cfg_mod.salvar_config({
             "planilha": self.v_planilha.get(),
             "pdfs": self.v_pdfs.get(),
             "xml": self.v_xml.get(),
             "saida": self.v_saida.get()
         })
+
 
     # =====================================================
     # SELETORES
