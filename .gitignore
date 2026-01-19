@@ -1,0 +1,10 @@
+__pycache__/
+.venv/
+.idea/
+
+dist/
+build/
+dlls/
+poppler/
+
+*.spec
