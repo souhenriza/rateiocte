@@ -34,14 +34,15 @@ O sistema foi projetado com arquitetura modular, separando interfaces gráficas 
 
 CodFinal RateioCTe/
 
-├── main.py     
-            # Ponto de entrada da aplicação
+├── main.py      # Ponto de entrada da aplicação
+
+
 ├── assets/
-│   ├── adimax.png
-│   └── adimax.ico
+    ├── adimax.png
+    └── adimax.ico
 
 ├── config/
-│   └── config.json      # Configurações persistidas
+     └── config.json      # Configurações persistidas
 
 ├── src/
 │   ├── __init__.py
