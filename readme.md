@@ -33,12 +33,16 @@ O sistema foi projetado com arquitetura modular, separando interfaces gráficas 
 ## Arquitetura do projeto
 
 CodFinal RateioCTe/
-├── main.py                 # Ponto de entrada da aplicação
+
+├── main.py     
+            # Ponto de entrada da aplicação
 ├── assets/
 │   ├── adimax.png
 │   └── adimax.ico
+
 ├── config/
-│   └── config.json         # Configurações persistidas
+│   └── config.json      # Configurações persistidas
+
 ├── src/
 │   ├── __init__.py
 │   ├── gui.py              # Interface gráfica (Tkinter)
@@ -47,6 +51,7 @@ CodFinal RateioCTe/
 │   ├── xml_utils.py        # Leitura e validação de XML CT-e
 │   ├── utils.py            # Funções auxiliares (conversões, validações)
 │   └── config.py           # Persistência de configurações
+
 ├── requirements.txt
 └── README.md
 ---
