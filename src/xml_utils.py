@@ -86,3 +86,75 @@ def extrair_valor_total_cte(xml_path: str):
 
     except Exception:
         return None
+
+
+def extrair_numero_cte_xml(xml_path: str) -> str | None:
+    """
+    Retorna o número do CT-e (nCT) do XML.
+    """
+    try:
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+
+        ns = {"cte": "http://www.portalfiscal.inf.br/cte"}
+
+        nct = root.find(".//cte:nCT", ns)
+        if nct is None:
+            return None
+
+        return nct.text.lstrip("0")
+
+    except Exception:
+        return None
+
+def extrair_chave_cte(xml_path: str):   
+    if not xml_path or not os.path.exists(xml_path):
+        return None
+
+    try:
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+        ns = {"cte": "http://www.portalfiscal.inf.br/cte"}
+
+        inf_cte = root.find(".//cte:infCte", ns)
+        if inf_cte is not None:
+            chave = inf_cte.get('Id', '').replace('CTe','')
+            return chave 
+        return None
+
+    except Exception:
+        return None
+    
+
+def classificar_cte(xml_path: str) -> str | None:
+    if not xml_path or not os.path.exists(xml_path):
+        return None
+    
+    try: 
+        root = ET.parse(xml_path).getroot()
+
+        ns = {"cte": "http://www.portalfiscal.inf.br/cte"}
+
+        tipo = root.find('.//cte:tpCTe', ns)
+
+        return tipo.text if tipo is not None else None
+    
+    except Exception:
+        return None
+    
+def inf_cte(xml_path:str) -> bool:
+    if not xml_path or not os.path.exists(xml_path):
+        return False
+    
+    try: 
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+
+        for elem in root.iter():
+            if elem.tag.endswith('infCteComp'):
+                return True
+            
+        return False
+
+    except Exception:
+        return False

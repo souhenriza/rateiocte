@@ -19,14 +19,14 @@ from .xml_utils import (
     extract_cte_number_from_chave,
     localizar_xml_por_chave,
     extrair_valor_total_cte,
-    chave_cte
+    chave_cte, extrair_numero_cte_xml,
+    extrair_chave_cte, classificar_cte, inf_cte
 )
 
 from .generalsutils import (
     converter_moeda_para_decimal,
     formato_brl,
-    identificar_prefixo_oper,
-    verificar_complemento
+    identificar_prefixo_oper
 )
 
 
@@ -65,15 +65,29 @@ def processar(
             if not nome.lower().endswith(".xml"):
                 continue
 
-            chave = extract_chave_from_xml_filename(nome)
+            xml_path = os.path.join(pasta_xml, nome)
+
+            chave = extrair_chave_cte(xml_path)
             if not chave or not chave_cte(chave):
                 continue
+            numero_xml = extrair_numero_cte_xml(xml_path)
+            if not numero_xml:
+                continue
 
-            numero = extract_cte_number_from_chave(chave)
-            if numero:
-                mapa_cte[numero.lstrip("0")] = chave
+            tipo = classificar_cte(xml_path)
+            complement_ref = (tipo != '0' or inf_cte(xml_path))
+
+            if complement_ref:
+                print(f'CTe {numero_xml} IGNORADO por ser do tipo Complemento')     
+                continue
+
+            mapa_cte[numero_xml] = {'chave': chave,
+                                    'xml': xml_path}
 
     log(f"📌 XMLs indexados: {len(mapa_cte)}")
+
+
+
 
     # =====================================================
     # RENOMEIO DE PDFs
@@ -119,15 +133,19 @@ def processar(
         if progresso:
             progresso["value"] = i
 
-        ncte_str = str(int(ncte))
-        chave_encontrada = mapa_cte.get(ncte_str)
+        xml_path = None  # ← CORREÇÃO CRÍTICA
 
-        if not chave_encontrada:
+        ncte_str = str(int(ncte))
+        info_cte = mapa_cte.get(ncte_str)
+
+
+        if not info_cte:
             erros_chave += 1
             lista_erros_chave.append(ncte_str)
-            log(f"❌ Chave não encontrada para CT-e {ncte_str}")
+            log(f"❌ CT-e {ncte_str} não encontrado ou ignorado (f)")
             continue
-
+        chave_encontrada = info_cte['chave']
+        xml_path = info_cte['xml']
         pdf = localizar_pdf(pdf_base, chave_encontrada)
         if not pdf:
             erros_pdf += 1
@@ -136,17 +154,10 @@ def processar(
             continue
 
         reader = PdfReader(pdf)
-        texto_primeira_pagina = reader.pages[0].extract_text()
-
-        if verificar_complemento(texto_primeira_pagina):
-            cte_complemento_qtd += 1
-            cte_complemento_lista.append(ncte_str)
-            log(f"ℹ️ CT-e {ncte_str} identificado como COMPLEMENTO")
-
+        
         linhas = []
         valores = []
 
-        xml_path = localizar_xml_por_chave(chave_encontrada, pasta_xml)
         valor_cte = extrair_valor_total_cte(xml_path) if xml_path else None
 
         for _, r in grupo.iterrows():
@@ -215,7 +226,7 @@ def processar(
     log(f"Chaves não encontradas: {erros_chave}")
     log(f"PDFs não encontrados: {erros_pdf}")
 
-    if cte_complemento_qtd:
+    if cte_complemento_qtd>0:
         log(f"📌 CT-es de complemento: {cte_complemento_qtd}")
 
     tempo_final = time.time()

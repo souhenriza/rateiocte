@@ -13,7 +13,8 @@ from tkinter.scrolledtext import ScrolledText
 from PIL import Image, ImageTk
 
 from .rateio import processar
-import src.config as cfg_mod
+from . import config as cfg_mod
+
     
 # =====================================================
 # CONSTANTES VISUAIS / ASSETS

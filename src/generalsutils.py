@@ -82,15 +82,6 @@ def identificar_prefixo_oper(operacao: str):
 # VERIFICAÇÕES DE TEXTO
 # =====================================================
 
-def verificar_complemento(texto_pdf: str) -> bool:
-    """
-    Verifica se o CT-e é do tipo COMPLEMENTO.
-    """
-    if not texto_pdf:
-        return False
-
-    return "COMPLEMENTO" in texto_pdf.upper()
-
 
 # =====================================================
 # AJUSTES DE VALOR
