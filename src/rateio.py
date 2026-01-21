@@ -11,7 +11,8 @@ from .pdf_utils import (
     localizar_pdf,
     criar_overlay,
     sobrepor_pdf,
-    renomear_pdfs_para_xmls
+    renomear_pdfs_para_xmls,
+    debug_chave_no_pdf
 )
 
 from .xml_utils import (
@@ -60,32 +61,49 @@ def processar(
     # =====================================================
     mapa_cte = {}
 
+    # =====================================================
+    # INDEXAÇÃO DE XMLs
+    # =====================================================
+    mapa_cte = {}
+
     if pasta_xml and os.path.isdir(pasta_xml):
         for nome in os.listdir(pasta_xml):
             if not nome.lower().endswith(".xml"):
                 continue
 
             xml_path = os.path.join(pasta_xml, nome)
-
             chave = extrair_chave_cte(xml_path)
+            
             if not chave or not chave_cte(chave):
                 continue
+                
             numero_xml = extrair_numero_cte_xml(xml_path)
             if not numero_xml:
                 continue
 
+            # IDENTIFICAÇÃO RIGOROSA
             tipo = classificar_cte(xml_path)
-            complement_ref = (tipo != '0' or inf_cte(xml_path))
+            tem_tag_comp = inf_cte(xml_path)
+            
+            # Um CT-e é COMPLEMENTO se: tpCTe for '1' OU possuir a tag <infCteComp>
+            is_complemento = (tipo != '0' or tem_tag_comp)
 
-            if complement_ref:
-                print(f'CTe {numero_xml} IGNORADO por ser do tipo Complemento')     
+            if is_complemento:
+                log(f"⚠️ Ignorado: {nome} (Tipo: {tipo}, Complemento: {tem_tag_comp})")     
                 continue
 
-            mapa_cte[numero_xml] = {'chave': chave,
-                                    'xml': xml_path}
+            # PROTEÇÃO: Se já existe este número no mapa, não sobrescrever 
+            # (isso evita que XMLs duplicados ou mal formados causem confusão)
+            if numero_xml in mapa_cte:
+                log(f"ℹ️ Número {numero_xml} duplicado ignorado: {nome}")
+                continue
 
-    log(f"📌 XMLs indexados: {len(mapa_cte)}")
+            mapa_cte[numero_xml] = {
+                'chave': chave,
+                'xml': xml_path
+            }
 
+    log(f"📌 XMLs Válidos (Normais) indexados: {len(mapa_cte)}")
 
 
 
@@ -146,7 +164,12 @@ def processar(
             continue
         chave_encontrada = info_cte['chave']
         xml_path = info_cte['xml']
+
+
         pdf = localizar_pdf(pdf_base, chave_encontrada)
+
+        debug_chave_no_pdf(pdf, chave_encontrada)
+
         if not pdf:
             erros_pdf += 1
             lista_erros_pdf.append(ncte_str)

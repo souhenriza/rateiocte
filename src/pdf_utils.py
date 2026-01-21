@@ -180,7 +180,20 @@ def renomear_pdfs_para_xmls(xml_pasta, pdf_pasta, log):
             continue
 
         numero = chave[25:34].lstrip("0")
-
+# ... (código anterior)
+    for xml in os.listdir(xml_pasta):
+        xml_path = os.path.join(xml_pasta, xml)
+        
+        # ADICIONE ESTA VALIDAÇÃO AQUI TAMBÉM:
+        # Importe as funções necessárias se não estiverem disponíveis
+        from .xml_utils import classificar_cte, inf_cte 
+        
+        tipo = classificar_cte(xml_path)
+        if tipo != '0' or inf_cte(xml_path):
+            continue # Não usa XML de complemento para renomear PDFs
+            
+        # ... (segue o restante da sua lógica de renomeio)
+        
         pdf = localizar_pdf(pdf_pasta, numero)
         if pdf:
             safe_rename(pdf, destino)
@@ -216,3 +229,34 @@ def sobrepor_pdf(pdf_original, overlay_pdf, pdf_saida):
         writer.write(f)
 
     os.remove(overlay_pdf)
+
+from PyPDF2 import PdfReader
+
+def debug_chave_no_pdf(pdf_path: str, chave: str):
+    try:
+        reader = PdfReader(pdf_path)
+
+        for i, page in enumerate(reader.pages):
+            texto = page.extract_text() or ""
+
+            if chave in texto:
+                print(
+                    f"🔎 CHAVE ENCONTRADA NO PDF\n"
+                    f"Arquivo: {os.path.basename(pdf_path)}\n"
+                    f"Página: {i + 1}\n"
+                    f"Chave encontrada: {chave}\n"
+                    f"{'-'*50}"
+                )
+                return i + 1  # página (1-based)
+
+        print(
+            f"⚠️ Chave NÃO encontrada no PDF\n"
+            f"Arquivo: {os.path.basename(pdf_path)}\n"
+            f"Chave procurada: {chave}\n"
+            f"{'-'*50}"
+        )
+        return None
+
+    except Exception as e:
+        print(f"❌ Erro ao ler PDF {pdf_path}: {e}")
+        return None

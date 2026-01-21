@@ -131,14 +131,22 @@ def classificar_cte(xml_path: str) -> str | None:
         return None
     
     try: 
-        root = ET.parse(xml_path).getroot()
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
 
+        # Tenta encontrar com o namespace padrão do CT-e
         ns = {"cte": "http://www.portalfiscal.inf.br/cte"}
-
         tipo = root.find('.//cte:tpCTe', ns)
 
-        return tipo.text if tipo is not None else None
-    
+        if tipo is not None and tipo.text:
+            return tipo.text.strip() # .strip() remove espaços e \n
+        
+        # Fallback: procura em qualquer lugar sem depender de prefixo de namespace
+        for elem in root.iter():
+            if elem.tag.endswith('tpCTe'):
+                return elem.text.strip() if elem.text else None
+
+        return None
     except Exception:
         return None
     
