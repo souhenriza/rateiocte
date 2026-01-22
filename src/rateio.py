@@ -4,6 +4,7 @@ import time
 from decimal import Decimal, ROUND_HALF_UP
 import pandas as pd
 from PyPDF2 import PdfReader, PdfWriter
+import re
 
 # Importações locais
 from .pdf_utils import (
@@ -46,7 +47,6 @@ def processar(
     def log_err(msg):  logger_func(f"❌ {msg}", tag="erro")
     def log_warn(msg): logger_func(f"⚠️  {msg}", tag="aviso")
     
-    # Wrapper para atualizar status visualmente
     def atualizar_status(msg):
         status_func(msg)
 
@@ -60,7 +60,7 @@ def processar(
     # =====================================================
     # FASE 1: INDEXAÇÃO DE XMLs
     # =====================================================
-    atualizar_status("Iniciando varredura de XMLs...")
+    atualizar_status("Iniciando varredura de XMLs")
     
     mapa_cte = {}
 
@@ -69,11 +69,9 @@ def processar(
         log_info(f"Encontrados {len(arquivos_xml)} arquivos XML.")
 
         for idx, nome in enumerate(arquivos_xml):
-            # --- MICRO-UPDATE: Avisa qual XML está lendo ---
-            # Mostra o nome do arquivo se não for muito longo, ou apenas contagem
-            msg_curta = (nome[:30] + '..') if len(nome) > 30 else nome
+
+            msg_curta = re.sub(r'\D', "", nome)
             atualizar_status(f"Lendo XML ({idx+1}/{len(arquivos_xml)}): {msg_curta}")
-            # -----------------------------------------------
 
             xml_path = os.path.join(pasta_xml, nome)
             
@@ -105,7 +103,7 @@ def processar(
     # =====================================================
     # FASE 2: SPLIT E ORGANIZAÇÃO DE PDFs
     # =====================================================
-    atualizar_status("Iniciando análise de PDFs...")
+    atualizar_status("Iniciando análise de PDFs")
 
     split_temp = os.path.join(pasta_pdfs, "_split_temp")
     chaves_validas = {info['chave'] for info in mapa_cte.values()}
@@ -117,13 +115,12 @@ def processar(
             caminho = os.path.join(pasta_pdfs, pdf)
             try:
                 if len(PdfReader(caminho).pages) > 0:
-                    # AQUI PASSAMOS O STATUS_FUNC PARA DENTRO DO SPLIT
                     split_pdf_por_cte(
                         caminho, 
                         split_temp, 
                         chaves_validas, 
                         log_info, 
-                        status_callback=atualizar_status # <--- O segredo está aqui
+                        status_callback=atualizar_status 
                     )
             except Exception as e:
                 log_warn(f'Erro ao abrir PDF {pdf}: {e}')
@@ -135,7 +132,7 @@ def processar(
     # =====================================================
     # FASE 3: LEITURA DA PLANILHA
     # =====================================================
-    atualizar_status("Carregando Planilha Excel...")
+    atualizar_status("Carregando Planilha Excel")
     try:
         df = pd.read_excel(planilha)
         grupos = df.groupby("N° CT-e")
@@ -157,7 +154,7 @@ def processar(
         ncte_str = str(int(ncte))
         
         # --- MICRO-UPDATE: Rateio ---
-        atualizar_status(f"Rateando CT-e {ncte_str} ({i}/{total_cte})...")
+        atualizar_status(f"Rateando CT-e {ncte_str} ({i}/{total_cte})")
         # ----------------------------
 
         info_cte = mapa_cte.get(ncte_str)
@@ -228,7 +225,7 @@ def processar(
     # FINALIZAÇÃO
     # =====================================================
     if pdf_unico and pdf_unico_writer:
-        atualizar_status("Gerando PDF Unificado...")
+        atualizar_status("Gerando PDF Unificado.")
         from datetime import datetime
         ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
         nome = f"CTE_UNIFICADO_{ts}.pdf"

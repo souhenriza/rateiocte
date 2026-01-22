@@ -109,10 +109,7 @@ def extrair_chave_somente_barcode(imagem, log=None):
 # =======================================================
 #
 def split_pdf_por_cte(pdf_entrada, pasta_saida, mapa_chaves, log, status_callback=None):
-    """
-    Divide o PDF validando cada página.
-    Aceita 'status_callback' para atualizar a GUI em tempo real (página a página).
-    """
+    
     os.makedirs(pasta_saida, exist_ok=True)
     
     try:
@@ -132,9 +129,8 @@ def split_pdf_por_cte(pdf_entrada, pasta_saida, mapa_chaves, log, status_callbac
     total_paginas = len(reader.pages)
 
     for i, page in enumerate(reader.pages):
-        # --- MICRO-UPDATE: Avisa qual página está lendo ---
         if status_callback:
-            status_callback(f"Lendo página {i + 1} de {total_paginas}...")
+            status_callback(f"Lendo página {i + 1} de {total_paginas}")
         # --------------------------------------------------
 
         imagem = imagens[i] if i < len(imagens) else None

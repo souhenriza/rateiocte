@@ -9,9 +9,6 @@ import xml.etree.ElementTree as ET
 # =====================================================
 
 def chave_cte(chave: str) -> bool:
-    """
-    Valida se a string é uma chave CT-e válida.
-    """
     return (
         chave
         and len(chave) == 44
