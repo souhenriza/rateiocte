@@ -107,37 +107,58 @@ def extrair_chave_somente_barcode(imagem, log=None):
 # =======================================================
 
 # =======================================================
-def split_pdf_por_cte(pdf_entrada, pasta_saida, mapa_chaves, log):
+#
+def split_pdf_por_cte(pdf_entrada, pasta_saida, mapa_chaves, log, status_callback=None):
     """
-    Divide o PDF validando cada página contra o mapa de chaves autorizadas (Tipo 0).
+    Divide o PDF validando cada página.
+    Aceita 'status_callback' para atualizar a GUI em tempo real (página a página).
     """
     os.makedirs(pasta_saida, exist_ok=True)
     
     try:
+        if status_callback:
+            status_callback(f"Abrindo PDF: {os.path.basename(pdf_entrada)}...")
+            
         reader = PdfReader(pdf_entrada)
+        # Convertendo imagens (isso pode demorar, avisa o user)
+        if status_callback:
+            status_callback(f"Renderizando páginas do PDF para leitura...")
+            
         imagens = converter_pdf_em_imagens(pdf_entrada, log) 
     except Exception as e:
         log(f"❌ Erro ao ler PDF: {e}")
         return
 
+    total_paginas = len(reader.pages)
+
     for i, page in enumerate(reader.pages):
+        # --- MICRO-UPDATE: Avisa qual página está lendo ---
+        if status_callback:
+            status_callback(f"Lendo página {i + 1} de {total_paginas}...")
+        # --------------------------------------------------
+
         imagem = imagens[i] if i < len(imagens) else None
-        
-
         chave = extrair_chave_somente_barcode(imagem, log)
-
 
         if chave and chave in mapa_chaves:
             destino = os.path.join(pasta_saida, f"{chave}-procCTe.pdf")
+            
+            # --- MICRO-UPDATE: Avisa que está gravando ---
+            if status_callback:
+                status_callback(f"Gravando arquivo: {chave}...")
+            # ---------------------------------------------
+            
+            if os.path.exists(destino):
+                continue
+
             writer = PdfWriter()
             writer.add_page(page)
             with open(destino, "wb") as f:
                 writer.write(f)
-            log(f"✔ Página {i + 1} processada: {chave}")
+            log(f"✔ Página {i + 1} separada: {chave}")
         else:
             if chave:
-                log(f"⏭️ Ignorado: Chave {chave} lida, mas não está no mapa de CT-e Normal.")
-
+                log(f"⏭️ Ignorado: Chave {chave} lida, mas não está no mapa.")
 
 # =====================================================
 # LOCALIZAÇÃO E RENOMEIO

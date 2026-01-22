@@ -2,22 +2,24 @@ import os
 import shutil
 import time
 from decimal import Decimal, ROUND_HALF_UP
-
 import pandas as pd
 from PyPDF2 import PdfReader, PdfWriter
 
+# Importações locais
 from .pdf_utils import (
     split_pdf_por_cte,
     localizar_pdf,
     criar_overlay,
-    sobrepor_pdf,
-    debug_chave_no_pdf
+    sobrepor_pdf
 )
 
 from .xml_utils import (
+    extrair_chave_cte,
     extrair_valor_total_cte,
-    chave_cte, extrair_numero_cte_xml,
-    extrair_chave_cte, classificar_cte, inf_cte
+    classificar_cte,
+    inf_cte,
+    chave_cte,
+    extrair_numero_cte_xml
 )
 
 from .generalsutils import (
@@ -26,50 +28,56 @@ from .generalsutils import (
     identificar_prefixo_oper
 )
 
-
 def processar(
     planilha: str,
     pasta_pdfs: str,
     pasta_xml: str,
     pasta_saida: str,
     pdf_unico: bool,
-    log,
+    logger_func,
+    status_func,
     progresso=None
 ):
-    """
-    Executa o processamento completo de rateio de CT-e.
-    """
-
     tempo_inicial = time.time()
+
+    # Helpers
+    def log_info(msg): logger_func(f"ℹ️  {msg}")
+    def log_ok(msg):   logger_func(f"✅ {msg}", tag="sucesso")
+    def log_err(msg):  logger_func(f"❌ {msg}", tag="erro")
+    def log_warn(msg): logger_func(f"⚠️  {msg}", tag="aviso")
+    
+    # Wrapper para atualizar status visualmente
+    def atualizar_status(msg):
+        status_func(msg)
 
     sucesso = 0
     erros_chave = 0
     erros_pdf = 0
-
+    cte_complemento_qtd = 0
     lista_erros_chave = []
     lista_erros_pdf = []
 
-    cte_complemento_qtd = 0
-    cte_complemento_lista = []
-
     # =====================================================
-    # INDEXAÇÃO DE XMLs
+    # FASE 1: INDEXAÇÃO DE XMLs
     # =====================================================
-    mapa_cte = {}
-
-    # =====================================================
-    # INDEXAÇÃO DE XMLs
-    # =====================================================
+    atualizar_status("Iniciando varredura de XMLs...")
+    
     mapa_cte = {}
 
     if pasta_xml and os.path.isdir(pasta_xml):
-        for nome in os.listdir(pasta_xml):
-            if not nome.lower().endswith(".xml"):
-                continue
+        arquivos_xml = [f for f in os.listdir(pasta_xml) if f.lower().endswith(".xml")]
+        log_info(f"Encontrados {len(arquivos_xml)} arquivos XML.")
+
+        for idx, nome in enumerate(arquivos_xml):
+            # --- MICRO-UPDATE: Avisa qual XML está lendo ---
+            # Mostra o nome do arquivo se não for muito longo, ou apenas contagem
+            msg_curta = (nome[:30] + '..') if len(nome) > 30 else nome
+            atualizar_status(f"Lendo XML ({idx+1}/{len(arquivos_xml)}): {msg_curta}")
+            # -----------------------------------------------
 
             xml_path = os.path.join(pasta_xml, nome)
-            chave = extrair_chave_cte(xml_path)
             
+            chave = extrair_chave_cte(xml_path)
             if not chave or not chave_cte(chave):
                 continue
                 
@@ -80,14 +88,11 @@ def processar(
             tipo = classificar_cte(xml_path)
             tem_tag_comp = inf_cte(xml_path)
             
-            is_complemento = (tipo != '0' or tem_tag_comp)
-
-            if is_complemento:
-                log(f"⚠️ Ignorado: {nome} (Tipo: {tipo}, Complemento: {tem_tag_comp})")     
+            if (tipo != '0' or tem_tag_comp):
+                cte_complemento_qtd += 1
                 continue
 
             if numero_xml in mapa_cte:
-                log(f"ℹ️ Número {numero_xml} duplicado ignorado: {nome}")
                 continue
 
             mapa_cte[numero_xml] = {
@@ -95,154 +100,155 @@ def processar(
                 'xml': xml_path
             }
 
-    log(f"📌 XMLs Válidos (Normais) indexados: {len(mapa_cte)}")
-
-
+    log_ok(f"Indexação concluída: {len(mapa_cte)} CT-es válidos.")
 
     # =====================================================
-    # RENOMEIO DE PDFs
+    # FASE 2: SPLIT E ORGANIZAÇÃO DE PDFs
     # =====================================================
-    
-    # =====================================================
-    # SPLIT DE PDFs
-    # =====================================================
+    atualizar_status("Iniciando análise de PDFs...")
+
     split_temp = os.path.join(pasta_pdfs, "_split_temp")
-    pdf_unico_writer = PdfWriter() if pdf_unico else None
-
     chaves_validas = {info['chave'] for info in mapa_cte.values()}
-    for pdf in os.listdir(pasta_pdfs):
-        if not pdf.lower().endswith(".pdf"):
-            continue
-
-        caminho = os.path.join(pasta_pdfs, pdf)
-
-        try:
-            if len(PdfReader(caminho).pages) > 0:
-                split_pdf_por_cte(caminho, split_temp, chaves_validas, log)
-        except Exception as e:
-            log(f'⚠️ Erro ao tentar split no arquivo {pdf}: {e}')
-            pass
+    
+    arquivos_pdf = [p for p in os.listdir(pasta_pdfs) if p.lower().endswith(".pdf")]
+    
+    if arquivos_pdf:
+        for pdf in arquivos_pdf:
+            caminho = os.path.join(pasta_pdfs, pdf)
+            try:
+                if len(PdfReader(caminho).pages) > 0:
+                    # AQUI PASSAMOS O STATUS_FUNC PARA DENTRO DO SPLIT
+                    split_pdf_por_cte(
+                        caminho, 
+                        split_temp, 
+                        chaves_validas, 
+                        log_info, 
+                        status_callback=atualizar_status # <--- O segredo está aqui
+                    )
+            except Exception as e:
+                log_warn(f'Erro ao abrir PDF {pdf}: {e}')
+    else:
+        log_warn("Nenhum PDF encontrado na pasta.")
 
     pdf_base = split_temp if os.path.isdir(split_temp) else pasta_pdfs
 
     # =====================================================
-    # PLANILHA
+    # FASE 3: LEITURA DA PLANILHA
     # =====================================================
-    df = pd.read_excel(planilha)
-    grupos = df.groupby("N° CT-e")
+    atualizar_status("Carregando Planilha Excel...")
+    try:
+        df = pd.read_excel(planilha)
+        grupos = df.groupby("N° CT-e")
+        total_cte = len(grupos)
+        if progresso: progresso["maximum"] = total_cte
+        log_ok(f"Planilha carregada: {total_cte} grupos.")
+    except Exception as e:
+        log_err(f"Erro no Excel: {e}")
+        return
 
-    total_cte = len(grupos)
-    if progresso:
-        progresso["maximum"] = total_cte
+    # =====================================================
+    # FASE 4: PROCESSAMENTO
+    # =====================================================
+    pdf_unico_writer = PdfWriter() if pdf_unico else None
 
-    # =====================================================
-    # PROCESSAMENTO PRINCIPAL
-    # =====================================================
     for i, (ncte, grupo) in enumerate(grupos, start=1):
-
-        if progresso:
-            progresso["value"] = i
-
-        xml_path = None  # ← CORREÇÃO CRÍTICA
-
+        if progresso: progresso["value"] = i
+        
         ncte_str = str(int(ncte))
-        info_cte = mapa_cte.get(ncte_str)
+        
+        # --- MICRO-UPDATE: Rateio ---
+        atualizar_status(f"Rateando CT-e {ncte_str} ({i}/{total_cte})...")
+        # ----------------------------
 
+        info_cte = mapa_cte.get(ncte_str)
 
         if not info_cte:
             erros_chave += 1
             lista_erros_chave.append(ncte_str)
-            log(f"❌ CT-e {ncte_str} não encontrado ou ignorado (f)")
+            log_err(f"CT-e {ncte_str}: XML ausente.")
             continue
-        chave_encontrada = info_cte['chave']
+
+        chave = info_cte['chave']
         xml_path = info_cte['xml']
-
-
-        pdf = localizar_pdf(pdf_base, chave_encontrada)
-
-        debug_chave_no_pdf(pdf, chave_encontrada)
+        pdf = localizar_pdf(pdf_base, chave)
 
         if not pdf:
             erros_pdf += 1
             lista_erros_pdf.append(ncte_str)
-            log(f"❌ PDF não encontrado para CT-e {ncte_str}")
+            log_err(f"CT-e {ncte_str}: PDF ausente.")
             continue
 
-        reader = PdfReader(pdf)
-        
-        linhas = []
-        valores = []
+        try:
+            valores = []
+            linhas = []
+            valor_cte = extrair_valor_total_cte(xml_path)
 
-        valor_cte = extrair_valor_total_cte(xml_path) if xml_path else None
+            for _, r in grupo.iterrows():
+                base = converter_moeda_para_decimal(r.get("Vlr Contabil"))
+                if not base or base <= 0: continue
+                
+                base = base.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                prefixo = identificar_prefixo_oper(str(r.get("Operação", "")))
+                
+                if prefixo:
+                    linhas.append({"prefixo": prefixo, "valor": base})
+                    valores.append(base)
 
-        for _, r in grupo.iterrows():
-            base = converter_moeda_para_decimal(r.get("Vlr Contabil"))
-            if not base or base <= 0:
+            if valor_cte:
+                soma = sum(valores).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                diferenca = (valor_cte - soma).quantize(Decimal("0.01"))
+                if diferenca != Decimal("0.00") and abs(diferenca) <= Decimal("0.01"):
+                    if linhas:
+                        min(linhas, key=lambda x: x["valor"])["valor"] += diferenca
+
+            if not linhas:
+                log_warn(f"CT-e {ncte_str}: Sem linhas válidas.")
                 continue
 
-            base = base.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            prefixo = identificar_prefixo_oper(str(r.get("Operação", "")))
+            texto = [f"{l['prefixo']}: R$ {formato_brl(l['valor'])}" for l in linhas]
+            
+            overlay = os.path.join(pasta_saida, f"{ncte}_overlay.pdf")
+            nome_final = os.path.basename(pdf).replace(".pdf", "_rateado.pdf").replace("_procCTe_rateado.pdf", "_rateado.pdf")
+            saida = os.path.join(pasta_saida, nome_final)
 
-            if not prefixo:
-                continue
+            criar_overlay("\n".join(texto), overlay)
+            sobrepor_pdf(pdf, overlay, saida)
 
-            linhas.append({"prefixo": prefixo, "valor": base})
-            valores.append(base)
+            if pdf_unico and pdf_unico_writer:
+                rd = PdfReader(saida)
+                for p in rd.pages: pdf_unico_writer.add_page(p)
 
-        if valor_cte:
-            soma = sum(valores).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            diferenca = (valor_cte - soma).quantize(Decimal("0.01"))
+            sucesso += 1
+            log_ok(f"CT-e {ncte_str} processado.")
 
-            if diferenca != Decimal("0.00") and abs(diferenca) <= Decimal("0.01"):
-                linha_menor = min(linhas, key=lambda x: x["valor"])
-                linha_menor["valor"] += diferenca
-                log(f"⚠️ Ajuste por arredondamento no CT-e {ncte_str}")
-
-        if not linhas:
-            continue
-
-        texto_overlay = [
-            f"{l['prefixo']}: R$ {formato_brl(l['valor'])}"
-            for l in linhas
-        ]
-
-        overlay = os.path.join(pasta_saida, f"{ncte}_overlay.pdf")
-        saida = os.path.join(
-            pasta_saida,
-            os.path.basename(pdf).replace(".pdf", "_rateado.pdf")
-        )
-
-        criar_overlay("\n".join(texto_overlay), overlay)
-
-        sobrepor_pdf(pdf, overlay, saida)
-
-        if pdf_unico and pdf_unico_writer:
-            reader_temp = PdfReader(saida)
-            for p in reader_temp.pages:
-                pdf_unico_writer.add_page(p)
-
-        sucesso += 1
-        log(f"✔ CT-e {ncte_str} processado")
+        except Exception as e:
+            log_err(f"Erro CT-e {ncte_str}: {e}")
 
     # =====================================================
-    # PDF ÚNICO
+    # FINALIZAÇÃO
     # =====================================================
     if pdf_unico and pdf_unico_writer:
-        caminho_final = os.path.join(pasta_saida, "CTE_RATEIO_UNIFICADO.pdf")
-        with open(caminho_final, "wb") as f:
+        atualizar_status("Gerando PDF Unificado...")
+        from datetime import datetime
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
+        nome = f"CTE_UNIFICADO_{ts}.pdf"
+        with open(os.path.join(pasta_saida, nome), "wb") as f:
             pdf_unico_writer.write(f)
-        log(f"📄 PDF único gerado → {os.path.basename(caminho_final)}")
+        log_info(f"PDF Unificado: {nome}")
 
-    # =====================================================
-    # RESUMO
-    # =====================================================
-    log("-" * 30)
-    log(f"CT-es processados com sucesso: {sucesso}")
-    log(f"Chaves não encontradas: {erros_chave}")
-    log(f"PDFs não encontrados: {erros_pdf}")
+    if os.path.isdir(split_temp):
+        shutil.rmtree(split_temp, ignore_errors=True)
 
-    if cte_complemento_qtd>0:
-        log(f"📌 CT-es de complemento: {cte_complemento_qtd}")
+    atualizar_status("Processamento Concluído!")
+    logger_func("-" * 30)
+    log_ok(f"SUCESSO: {sucesso} | ERROS: {erros_chave + erros_pdf}")
+    if cte_complemento_qtd: log_info(f"Complementos ignorados: {cte_complemento_qtd}")
+    tempo_total_seg = time.time() - tempo_inicial
+    minutos = int(tempo_total_seg//60)
+    segundos = int(tempo_total_seg % 60)
 
-    tempo_final = time.time()
-    log(f"⏱️ Tempo total: {round(tempo_final - tempo_inicial, 2)}s")
+    if minutos > 0:
+        texto_tempo = f'{minutos}:{segundos}'
+    else:
+        texto_tempo = f'{round(tempo_total_seg,2)} segundos '
+    logger_func(f"⏱️ Tempo: {texto_tempo}")
