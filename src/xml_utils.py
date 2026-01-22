@@ -19,19 +19,6 @@ def chave_cte(chave: str) -> bool:
         and chave[20:22] == "57"
     )
 
-
-# =====================================================
-# EXTRAÇÃO DE INFORMAÇÕES DO NOME DO XML
-# =====================================================
-
-def extract_chave_from_xml_filename(nome_arquivo: str):
-    """
-    Extrai a chave CT-e (44 dígitos) do nome do arquivo XML.
-    """
-    match = re.search(r"(\d{44})", nome_arquivo)
-    return match.group(1) if match else None
-
-
 def extract_cte_number_from_chave(chave: str):
     """
     Extrai o número do CT-e a partir da chave.

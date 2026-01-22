@@ -65,7 +65,11 @@ def converter_pdf_em_imagens(pdf_path, log=None):
 # EXTRAÇÃO DE CHAVE CT-e
 # =====================================================
 
-def extrair_chave_cte_da_imagem(imagem, log=None):
+def extrair_barcode(imagem, log=None):
+
+    if not imagem:
+        return None
+
     for codigo in decode(imagem):
         try:
             texto = codigo.data.decode("utf-8").strip()
@@ -74,62 +78,65 @@ def extrair_chave_cte_da_imagem(imagem, log=None):
 
         if chave_cte(texto):
             if log:
-                log("📦 Chave CT-e capturada via código de barras")
+                log("Código de barras lido com sucesso!")
             return texto
 
     return None
-
-
-def extrair_chave_cte(texto: str, imagem=None, log=None):
-    if texto:
-        encontrados = re.findall(r"\b\d{44}\b", texto)
-        for chave in encontrados:
-            if chave_cte(chave):
-                return chave
-
-    if imagem:
-        return extrair_chave_cte_da_imagem(imagem, log)
-
-    return None
-
 
 # =====================================================
 # SPLIT DE PDF POR CT-e
 # =====================================================
 
-def split_pdf_por_cte(pdf_entrada, pasta_saida, log):
-    os.makedirs(pasta_saida, exist_ok=True)
+def extrair_chave_somente_barcode(imagem, log=None):
+    """
+    Tenta extrair a chave CT-e exclusivamente via código de barras.
+    Retorna a string de 44 dígitos ou None.
+    """
+    if not imagem:
+        return None
+        
+    for codigo in decode(imagem):
+        try:
+            texto = codigo.data.decode("utf-8").strip()
 
+            if chave_cte(texto):
+                return texto
+        except Exception:
+            continue
+    return None
+# =======================================================
+
+# =======================================================
+def split_pdf_por_cte(pdf_entrada, pasta_saida, mapa_chaves, log):
+    """
+    Divide o PDF validando cada página contra o mapa de chaves autorizadas (Tipo 0).
+    """
+    os.makedirs(pasta_saida, exist_ok=True)
+    
     try:
         reader = PdfReader(pdf_entrada)
-    except PdfReadError:
-        log(f"❌ PDF inválido: {os.path.basename(pdf_entrada)}")
+        imagens = converter_pdf_em_imagens(pdf_entrada, log) 
+    except Exception as e:
+        log(f"❌ Erro ao ler PDF: {e}")
         return
 
-    imagens = converter_pdf_em_imagens(pdf_entrada, log)
-
     for i, page in enumerate(reader.pages):
-        try:
-            texto = page.extract_text()
-        except Exception:
-            texto = None
-
         imagem = imagens[i] if i < len(imagens) else None
-        chave = extrair_chave_cte(texto, imagem, log)
+        
 
-        if not chave:
-            log(f"❌ Página {i + 1}: chave CT-e não encontrada")
-            continue
+        chave = extrair_chave_somente_barcode(imagem, log)
 
-        destino = os.path.join(pasta_saida, f"{chave}-procCTe.pdf")
 
-        writer = PdfWriter()
-        writer.add_page(page)
-
-        with open(destino, "wb") as f:
-            writer.write(f)
-
-        log(f"✔ Página {i + 1} → {os.path.basename(destino)}")
+        if chave and chave in mapa_chaves:
+            destino = os.path.join(pasta_saida, f"{chave}-procCTe.pdf")
+            writer = PdfWriter()
+            writer.add_page(page)
+            with open(destino, "wb") as f:
+                writer.write(f)
+            log(f"✔ Página {i + 1} processada: {chave}")
+        else:
+            if chave:
+                log(f"⏭️ Ignorado: Chave {chave} lida, mas não está no mapa de CT-e Normal.")
 
 
 # =====================================================

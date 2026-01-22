@@ -11,14 +11,10 @@ from .pdf_utils import (
     localizar_pdf,
     criar_overlay,
     sobrepor_pdf,
-    renomear_pdfs_para_xmls,
     debug_chave_no_pdf
 )
 
 from .xml_utils import (
-    extract_chave_from_xml_filename,
-    extract_cte_number_from_chave,
-    localizar_xml_por_chave,
     extrair_valor_total_cte,
     chave_cte, extrair_numero_cte_xml,
     extrair_chave_cte, classificar_cte, inf_cte
@@ -81,19 +77,15 @@ def processar(
             if not numero_xml:
                 continue
 
-            # IDENTIFICAÇÃO RIGOROSA
             tipo = classificar_cte(xml_path)
             tem_tag_comp = inf_cte(xml_path)
             
-            # Um CT-e é COMPLEMENTO se: tpCTe for '1' OU possuir a tag <infCteComp>
             is_complemento = (tipo != '0' or tem_tag_comp)
 
             if is_complemento:
                 log(f"⚠️ Ignorado: {nome} (Tipo: {tipo}, Complemento: {tem_tag_comp})")     
                 continue
 
-            # PROTEÇÃO: Se já existe este número no mapa, não sobrescrever 
-            # (isso evita que XMLs duplicados ou mal formados causem confusão)
             if numero_xml in mapa_cte:
                 log(f"ℹ️ Número {numero_xml} duplicado ignorado: {nome}")
                 continue
@@ -110,15 +102,14 @@ def processar(
     # =====================================================
     # RENOMEIO DE PDFs
     # =====================================================
-    if pasta_xml:
-        renomear_pdfs_para_xmls(pasta_xml, pasta_pdfs, log)
-
+    
     # =====================================================
     # SPLIT DE PDFs
     # =====================================================
     split_temp = os.path.join(pasta_pdfs, "_split_temp")
     pdf_unico_writer = PdfWriter() if pdf_unico else None
 
+    chaves_validas = {info['chave'] for info in mapa_cte.values()}
     for pdf in os.listdir(pasta_pdfs):
         if not pdf.lower().endswith(".pdf"):
             continue
@@ -126,9 +117,10 @@ def processar(
         caminho = os.path.join(pasta_pdfs, pdf)
 
         try:
-            if len(PdfReader(caminho).pages) > 1:
-                split_pdf_por_cte(caminho, split_temp, log)
-        except Exception:
+            if len(PdfReader(caminho).pages) > 0:
+                split_pdf_por_cte(caminho, split_temp, chaves_validas, log)
+        except Exception as e:
+            log(f'⚠️ Erro ao tentar split no arquivo {pdf}: {e}')
             pass
 
     pdf_base = split_temp if os.path.isdir(split_temp) else pasta_pdfs
