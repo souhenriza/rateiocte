@@ -233,7 +233,7 @@ class RateioGUI:
     def atualizar_status_fase(self, texto):
         """Atualiza o label acima da barra e insere cabeçalho no log"""
         self.lbl_status.configure(text=texto)
-        self.log_msg(f"{texto.capitalize()}", tag="fase")
+        self.log_msg(f"{texto}", tag="fase")
 
     def log_msg(self, msg: str, tag=None):
         """Insere mensagem no terminal com suporte a cores"""
