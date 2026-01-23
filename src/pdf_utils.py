@@ -1,6 +1,41 @@
 import os
 import sys
 import subprocess
+
+# ==============================================================================
+# PATCH ANTI-FLASH GLOBAL (CRUCIAL: TEM QUE SER A PRIMEIRA COISA)
+# ==============================================================================
+# Isso impede que QUALQUER subprocesso (incluindo o Poppler) crie janelas pretas.
+# Deve ser executado ANTES de 'from pdf2image import ...'
+if sys.platform == "win32":
+    # Salva a classe original para segurança
+    _OriginalPopen = subprocess.Popen
+
+    class PopenSemJanela(_OriginalPopen):
+        def __init__(self, *args, **kwargs):
+            # Definições de flags do Windows para esconder janelas
+            startupinfo = kwargs.get('startupinfo', subprocess.STARTUPINFO())
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+            kwargs['startupinfo'] = startupinfo
+            
+            # Adiciona a flag CREATE_NO_WINDOW (0x08000000)
+            creationflags = kwargs.get('creationflags', 0)
+            kwargs['creationflags'] = creationflags | 0x08000000 # CREATE_NO_WINDOW
+            
+            # Redireciona saídas para o "limbo" para evitar erros de console inexistente
+            if 'stdin' not in kwargs: kwargs['stdin'] = subprocess.DEVNULL
+            if 'stdout' not in kwargs: kwargs['stdout'] = subprocess.DEVNULL
+            if 'stderr' not in kwargs: kwargs['stderr'] = subprocess.DEVNULL
+            
+            super().__init__(*args, **kwargs)
+
+    # Substitui a classe Popen padrão pela nossa versão silenciosa
+    subprocess.Popen = PopenSemJanela
+# ==============================================================================
+
+# --- AGORA SIM, PODEMOS IMPORTAR AS BIBLIOTECAS ---
+# Como o Popen já foi hackeado acima, o pdf2image vai usar a versão silenciosa
 from PyPDF2 import PdfReader, PdfWriter
 from pdf2image import convert_from_path
 from pyzbar.pyzbar import decode
@@ -31,34 +66,13 @@ def get_poppler_path():
 
 def renderizar_pagina_unica(pdf_path, numero_pagina, log_func=print):
     """
-    LAZY LOADING: Converte APENAS UMA página específica do PDF em imagem.
+    Converte APENAS UMA página específica do PDF em imagem.
     numero_pagina: Inteiro começando em 1.
     """
     path_poppler = get_poppler_path()
     
-    # === PATCH ANTI-FLASH (CMD) ===
-    original_popen = subprocess.Popen
-
-    def p_open_sem_janela(*args, **kwargs):
-        if sys.platform == "win32":
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_HIDE
-            kwargs['startupinfo'] = startupinfo
-            kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
-        
-        # Redireciona saídas para evitar erros
-        kwargs['stdin'] = subprocess.DEVNULL
-        kwargs['stdout'] = subprocess.DEVNULL
-        kwargs['stderr'] = subprocess.DEVNULL
-        return original_popen(*args, **kwargs)
-    
-    subprocess.Popen = p_open_sem_janela
-    # ==============================
-
     try:
         if path_poppler:
-            # first_page e last_page garantem que só renderizamos O NECESSÁRIO
             imagens = convert_from_path(
                 pdf_path, 
                 dpi=300, 
@@ -79,10 +93,7 @@ def renderizar_pagina_unica(pdf_path, numero_pagina, log_func=print):
     except Exception as e:
         if "poppler" in str(e).lower():
             log_func(f"❌ ERRO POPPLER: Não encontrado em {path_poppler}")
-        # Não lançamos erro fatal aqui para tentar continuar outras páginas se for algo pontual
         return None
-    finally:
-        subprocess.Popen = original_popen
 
 def extrair_chave_somente_barcode(imagem, log_func=print):
     """Lê barcode/QR code da imagem e retorna a chave."""
@@ -108,7 +119,6 @@ def split_pdf_por_cte(pdf_entrada, pasta_saida, mapa_chaves, log, status_callbac
     if status_callback:
         status_callback(f"Abrindo PDF: {nome_pdf}...")
 
-    # 1. Abre o PDF apenas para contar páginas e extrair conteúdo
     try:
         reader = PdfReader(pdf_entrada)
         total_paginas = len(reader.pages)
@@ -116,37 +126,31 @@ def split_pdf_por_cte(pdf_entrada, pasta_saida, mapa_chaves, log, status_callbac
         log(f"❌ Erro leitura PDF {nome_pdf}: {e}")
         return
 
-    # 2. Loop com Lazy Loading
+    # Loop página a página
     for i in range(total_paginas):
-        # Verifica Cancelamento
         if stop_event and stop_event.is_set():
             if status_callback: status_callback("Interrompendo leitura...")
             return
 
-        numero_real = i + 1  # Poppler usa base 1, Python base 0
+        numero_real = i + 1
         
         if status_callback:
             status_callback(f"Processando página {numero_real} de {total_paginas}...")
 
-        # AQUI ACONTECE A MÁGICA: Renderiza só a página atual
         imagem_atual = renderizar_pagina_unica(pdf_entrada, numero_real, log)
-        
-        # Tenta ler a chave
         chave = extrair_chave_somente_barcode(imagem_atual, log)
-
-        # Libera a memória da imagem explicitamente (opcional, mas boa prática)
-        del imagem_atual 
+        
+        # Libera memória imediatamente
+        if imagem_atual:
+            del imagem_atual 
 
         if chave and chave in mapa_chaves:
             destino = os.path.join(pasta_saida, f"{chave}-procCTe.pdf")
-            
-            # Evita re-trabalho se arquivo já existe
             if os.path.exists(destino):
                 continue
 
-            # Salva a página isolada
             writer = PdfWriter()
-            writer.add_page(reader.pages[i]) # Pega a página do PyPDF2 original
+            writer.add_page(reader.pages[i])
             with open(destino, "wb") as f:
                 writer.write(f)
 
@@ -160,8 +164,7 @@ def localizar_pdf(pasta, chave):
 def criar_overlay(texto_linhas, caminho_saida):
     c = canvas.Canvas(caminho_saida, pagesize=A4)
     width, height = A4
-    # Fonte corrigida
-    c.setFont("Helvetica-Bold", 10)
+    c.setFont("Helvetica-Bold", 10) # Fonte Corrigida
     x = 50
     y = height - 50 
     c.setFillColorRGB(0, 0, 0)
