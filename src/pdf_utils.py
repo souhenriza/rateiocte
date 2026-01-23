@@ -6,20 +6,15 @@ from pdf2image import convert_from_path
 from pyzbar.pyzbar import decode
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
-import io
 
 def get_poppler_path():
     """
     Tenta localizar a pasta do Poppler automaticamente.
-    Funciona tanto no VS Code quanto no Executável (PyInstaller).
     """
-
     if getattr(sys, 'frozen', False):
- 
         base_dir = os.path.dirname(sys.executable)
     else:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
 
     caminhos_possiveis = [
         os.path.join(base_dir, "poppler", "Library", "bin"), 
@@ -32,117 +27,128 @@ def get_poppler_path():
     for caminho in caminhos_possiveis:
         if os.path.exists(caminho) and ("pdftoppm.exe" in os.listdir(caminho) or "pdftoppm" in os.listdir(caminho)):
             return caminho
-            
-    return None # Não encontrou
+    return None
 
-def converter_pdf_em_imagens(pdf_path, log_func=print):
+def renderizar_pagina_unica(pdf_path, numero_pagina, log_func=print):
     """
-    Converte PDF para imagens usando o caminho explícito do Poppler.
+    LAZY LOADING: Converte APENAS UMA página específica do PDF em imagem.
+    numero_pagina: Inteiro começando em 1.
     """
     path_poppler = get_poppler_path()
     
-    original_oppen = subprocess.Popen
+    # === PATCH ANTI-FLASH (CMD) ===
+    original_popen = subprocess.Popen
 
-    def processar_sem_janela(*args, **kwargs):
-        if sys.platform == 'win32':
+    def p_open_sem_janela(*args, **kwargs):
+        if sys.platform == "win32":
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startupinfo.wShowWindow = subprocess.SW_HIDE
-
             kwargs['startupinfo'] = startupinfo
             kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
-
-        return original_oppen(*args, **kwargs)
+        
+        # Redireciona saídas para evitar erros
+        kwargs['stdin'] = subprocess.DEVNULL
+        kwargs['stdout'] = subprocess.DEVNULL
+        kwargs['stderr'] = subprocess.DEVNULL
+        return original_popen(*args, **kwargs)
     
-    subprocess.Popen = processar_sem_janela
+    subprocess.Popen = p_open_sem_janela
+    # ==============================
+
     try:
         if path_poppler:
-            # Usa o caminho encontrado
-            return convert_from_path(pdf_path, dpi=200, poppler_path=path_poppler)
+            # first_page e last_page garantem que só renderizamos O NECESSÁRIO
+            imagens = convert_from_path(
+                pdf_path, 
+                dpi=300, 
+                first_page=numero_pagina, 
+                last_page=numero_pagina, 
+                poppler_path=path_poppler
+            )
         else:
-            # Tenta usar o PATH do sistema (última esperança)
-            return convert_from_path(pdf_path, dpi=200)
+            imagens = convert_from_path(
+                pdf_path, 
+                dpi=300, 
+                first_page=numero_pagina, 
+                last_page=numero_pagina
+            )
         
+        return imagens[0] if imagens else None
+
     except Exception as e:
         if "poppler" in str(e).lower():
-            log_func(f"❌ ERRO POPPLER: Não foi possível localizar a pasta 'poppler' junto ao executável.\nCaminho tentado: {path_poppler}")
-        raise e
-    
+            log_func(f"❌ ERRO POPPLER: Não encontrado em {path_poppler}")
+        # Não lançamos erro fatal aqui para tentar continuar outras páginas se for algo pontual
+        return None
     finally:
-        subprocess.Popen = original_oppen
+        subprocess.Popen = original_popen
 
 def extrair_chave_somente_barcode(imagem, log_func=print):
-    """
-    Recebe uma imagem (PIL), tenta ler barcode/QR code.
-    Retorna a chave (string de 44 dígitos) ou None.
-    """
+    """Lê barcode/QR code da imagem e retorna a chave."""
+    if imagem is None: return None
     try:
         codigos = decode(imagem)
         for code in codigos:
             dados = code.data.decode("utf-8")
-            
             dados_limpos = dados.replace("CFe", "").strip()
-            
             if len(dados_limpos) == 44 and dados_limpos.isdigit():
                 return dados_limpos
     except Exception:
         pass
     return None
 
-def split_pdf_por_cte(pdf_entrada, pasta_saida, mapa_chaves, log, status_callback=None):
+def split_pdf_por_cte(pdf_entrada, pasta_saida, mapa_chaves, log, status_callback=None, stop_event=None):
     """
-    Lê o PDF de entrada, converte em imagens para achar a chave,
-    e salva cada página individualmente com o nome da chave.
+    Divide o PDF usando Lazy Loading (processa uma página por vez).
     """
     os.makedirs(pasta_saida, exist_ok=True)
+    nome_pdf = os.path.basename(pdf_entrada)
     
     if status_callback:
-        status_callback(f"Abrindo PDF: {os.path.basename(pdf_entrada)}")
+        status_callback(f"Abrindo PDF: {nome_pdf}...")
 
-    try:
-        if status_callback: status_callback("Renderizando páginas")
-        imagens = converter_pdf_em_imagens(pdf_entrada, log)
-    except Exception as e:
-        log(f"❌ Erro crítico ao processar imagens do PDF: {e}")
-        return 
-
-
+    # 1. Abre o PDF apenas para contar páginas e extrair conteúdo
     try:
         reader = PdfReader(pdf_entrada)
+        total_paginas = len(reader.pages)
     except Exception as e:
-        log(f"❌ Erro ao abrir PDF para leitura: {e}")
+        log(f"❌ Erro leitura PDF {nome_pdf}: {e}")
         return
 
+    # 2. Loop com Lazy Loading
+    for i in range(total_paginas):
+        # Verifica Cancelamento
+        if stop_event and stop_event.is_set():
+            if status_callback: status_callback("Interrompendo leitura...")
+            return
 
-    if len(imagens) != len(reader.pages):
-        log(f"⚠️ Aviso: O PDF tem {len(reader.pages)} páginas, mas conseguimos renderizar {len(imagens)} imagens. O processamento pode falhar.")
-
-    total_paginas = len(reader.pages)
-
-
-    for i, page in enumerate(reader.pages):
+        numero_real = i + 1  # Poppler usa base 1, Python base 0
+        
         if status_callback:
-            status_callback(f"Processando página {i + 1} de {total_paginas}")
+            status_callback(f"Processando página {numero_real} de {total_paginas}...")
 
-        if i >= len(imagens):
-            break
+        # AQUI ACONTECE A MÁGICA: Renderiza só a página atual
+        imagem_atual = renderizar_pagina_unica(pdf_entrada, numero_real, log)
+        
+        # Tenta ler a chave
+        chave = extrair_chave_somente_barcode(imagem_atual, log)
 
-        imagem = imagens[i]
-        chave = extrair_chave_somente_barcode(imagem, log)
+        # Libera a memória da imagem explicitamente (opcional, mas boa prática)
+        del imagem_atual 
 
         if chave and chave in mapa_chaves:
             destino = os.path.join(pasta_saida, f"{chave}-procCTe.pdf")
             
+            # Evita re-trabalho se arquivo já existe
             if os.path.exists(destino):
                 continue
 
+            # Salva a página isolada
             writer = PdfWriter()
-            writer.add_page(page)
+            writer.add_page(reader.pages[i]) # Pega a página do PyPDF2 original
             with open(destino, "wb") as f:
                 writer.write(f)
-            
-        else:
-            pass
 
 def localizar_pdf(pasta, chave):
     nome_alvo = f"{chave}-procCTe.pdf"
@@ -152,27 +158,20 @@ def localizar_pdf(pasta, chave):
     return None
 
 def criar_overlay(texto_linhas, caminho_saida):
-    """Cria um PDF transparente com o texto do rateio"""
     c = canvas.Canvas(caminho_saida, pagesize=A4)
     width, height = A4
-    
-    c.setFont("", 10)
-    
+    # Fonte corrigida
+    c.setFont("Helvetica-Bold", 10)
     x = 50
     y = height - 50 
-    
     c.setFillColorRGB(0, 0, 0)
-    
-    # Quebra o texto em linhas
     linhas = texto_linhas.split('\n')
     for linha in linhas:
         c.drawString(x, y, linha)
-        y -= 12 
-        
+        y -= 12
     c.save()
 
 def sobrepor_pdf(pdf_original, pdf_overlay, pdf_saida):
-    """Mescla o overlay no original"""
     reader_orig = PdfReader(pdf_original)
     reader_over = PdfReader(pdf_overlay)
     
@@ -187,8 +186,5 @@ def sobrepor_pdf(pdf_original, pdf_overlay, pdf_saida):
     with open(pdf_saida, "wb") as f:
         writer.write(f)
         
-
-    try:
-        os.remove(pdf_overlay)
-    except:
-        pass
+    try: os.remove(pdf_overlay)
+    except: pass

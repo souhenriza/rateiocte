@@ -72,6 +72,8 @@ class RateioGUI:
         self.v_xml = ctk.StringVar()
         self.v_saida = ctk.StringVar()
         self.v_pdf_unico = ctk.BooleanVar(value=False)
+        self.stop_event = threading.Event()
+        self.processando = False
 
         # Carregar configurações salvas
         self._carregar_config_gui()
@@ -138,7 +140,8 @@ class RateioGUI:
             hover_color=COR_HOVER,
             height=45,
             corner_radius=8,
-            command=self.iniciar_processamento
+            command=self.acao_botao
+
         )
         self.btn_processar.pack(fill="x", padx=120, pady=5)
 
@@ -285,30 +288,52 @@ class RateioGUI:
     # =====================================================
     # EXECUÇÃO (THREADING)
     # =====================================================
+    def acao_botao(self):
+        if not self.processando:
+            self.iniciar_processamento()
+        else:
+            self.parar_processamento()
+
+
+    def parar_processamento(self):
+        if messagebox.askyesno("Confirmar", "Deseja realmente cancelar o processamento?"):
+            self.stop_event.set() # Levanta a bandeira vermelha
+            self.btn_processar.configure(text="CANCELANDO...", state="disabled")
+            self.log_msg("⚠️ Solicitação de cancelamento enviada", tag="aviso")
+
     def iniciar_processamento(self):
         if not all([self.v_planilha.get(), self.v_pdfs.get(), self.v_saida.get()]):
             messagebox.showwarning("Atenção", "Preencha todos os campos obrigatórios.")
             return
 
-        self.btn_processar.configure(state="disabled", text="PROCESSANDO...", fg_color="#9CA3AF")
+        self.processando = True
+        self.stop_event.clear()
+
+        self.btn_processar.configure(
+            text="PARAR / CANCELAR", 
+            fg_color="#E43333",   # Vermelho
+            hover_color="#D83030", 
+            state="normal"       
+        )
+        
         self._salvar_config_gui()
         
-        # Inicia thread para não travar a tela
+
         threading.Thread(target=self._processar_thread, daemon=True).start()
 
     def _processar_thread(self):
         self.tempo_inicial = time.time()
         try:
-            # Chama o backend passando as funções ricas de log e status
             processar(
                 planilha=self.v_planilha.get(),
                 pasta_pdfs=self.v_pdfs.get(),
                 pasta_xml=self.v_xml.get(),
                 pasta_saida=self.v_saida.get(),
                 pdf_unico=self.v_pdf_unico.get(),
-                logger_func=self.log_msg,              # Função de log
-                status_func=self.atualizar_status_fase, # Função de fase
-                progresso=self.progress_adapter
+                logger_func=self.log_msg,              
+                status_func=self.atualizar_status_fase, 
+                progresso=self.progress_adapter,
+                stop_event=self.stop_event
             )
         except Exception as e:
             self.log_msg(f"ERRO FATAL: {e}", tag="erro")
@@ -319,9 +344,31 @@ class RateioGUI:
 
     def finalizar_processamento(self):
         total_segundos = self.tempo_final- self.tempo_inicial
+        duracao = self.tempo_final - self.tempo_inicial
+        minutos = int(duracao // 60)
+        segundos = int(duracao % 60)            
+        tempo_str = f"{minutos}m {segundos}s" if minutos > 0 else f"{round(duracao, 2)}s"
 
-        minutos = int(total_segundos // 60)
-        segundos = int(total_segundos % 60)
+        if self.stop_event.is_set():
+            texto_status = "Cancelado pelo usuário"
+            cor_status = "#FF8800" # Laranja
+            self.log_msg("❌ Processo abortado.", tag="erro")
+            messagebox.showinfo("Cancelado", "O processamento foi interrompido.")
+        else:
+            texto_status = f"Concluído em {tempo_str}"
+            cor_status = "#228B22"
+            messagebox.showinfo("Sucesso", f"Processamento concluído!\nTempo: {tempo_str}")
+
+        self.processando = False
+        self.btn_processar.configure(
+            state="normal", 
+            text="INICIAR PROCESSAMENTO", 
+            fg_color=LARANJA_ADIMAX, 
+            hover_color=COR_HOVER
+        )
+
+        self.lbl_status.configure(text=texto_status, text_color=cor_status)
+        self.log_msg("-" * 40)
 
         if minutos > 0:
             texto_duracao = f'{minutos}:{segundos}'
@@ -332,7 +379,4 @@ class RateioGUI:
         
         self.lbl_status.configure(text=f"Concluído em {texto_duracao}", text_color="#228B22")
         self.log_msg("-" * 40)
-        self.log_msg(f"Processo finalizado em {texto_duracao} segundos.", tag="sucesso")
-
-
-        messagebox.showinfo("Sucesso", f"Processamento concluído!\nTempo total: {texto_duracao}s")
+        self.log_msg(f"Processo finalizado em {texto_duracao}.", tag="sucesso")

@@ -6,5 +6,9 @@ dist/
 build/
 dlls/
 poppler/
+Executar/
 
 *.spec
+Executar.zip
+setup_script.iss
+

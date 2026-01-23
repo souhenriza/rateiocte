@@ -5,6 +5,7 @@ from decimal import Decimal, ROUND_HALF_UP
 import pandas as pd
 from PyPDF2 import PdfReader, PdfWriter
 import re
+import traceback  # <--- ESSENCIAL PARA VER O ERRO REAL
 
 # Importações locais
 from .pdf_utils import (
@@ -37,7 +38,8 @@ def processar(
     pdf_unico: bool,
     logger_func,
     status_func,
-    progresso=None
+    progresso=None,
+    stop_event = None
 ):
     tempo_inicial = time.time()
 
@@ -69,8 +71,13 @@ def processar(
         log_info(f"Encontrados {len(arquivos_xml)} arquivos XML.")
 
         for idx, nome in enumerate(arquivos_xml):
+            if stop_event and stop_event.is_set():
+                log_warn('Cancelado pelo usuário na leitura de XML.')
+                return 
 
             msg_curta = re.sub(r'\D', "", nome)
+            if len(msg_curta) > 30: msg_curta = msg_curta[:30] + "..."
+            
             atualizar_status(f"Lendo XML ({idx+1}/{len(arquivos_xml)}): {msg_curta}")
 
             xml_path = os.path.join(pasta_xml, nome)
@@ -100,6 +107,8 @@ def processar(
 
     log_ok(f"Indexação concluída: {len(mapa_cte)} CT-es válidos.")
 
+    if stop_event and stop_event.is_set(): return
+
     # =====================================================
     # FASE 2: SPLIT E ORGANIZAÇÃO DE PDFs
     # =====================================================
@@ -107,11 +116,14 @@ def processar(
 
     split_temp = os.path.join(pasta_pdfs, "_split_temp")
     chaves_validas = {info['chave'] for info in mapa_cte.values()}
-    
     arquivos_pdf = [p for p in os.listdir(pasta_pdfs) if p.lower().endswith(".pdf")]
     
     if arquivos_pdf:
         for pdf in arquivos_pdf:
+            if stop_event and stop_event.is_set():
+                log_warn('Cancelado durante leitura de PDF')
+                return 
+
             caminho = os.path.join(pasta_pdfs, pdf)
             try:
                 if len(PdfReader(caminho).pages) > 0:
@@ -120,12 +132,15 @@ def processar(
                         split_temp, 
                         chaves_validas, 
                         log_info, 
-                        status_callback=atualizar_status 
+                        status_callback=atualizar_status,
+                        stop_event=stop_event
                     )
             except Exception as e:
                 log_warn(f'Erro ao abrir PDF {pdf}: {e}')
     else:
         log_warn("Nenhum PDF encontrado na pasta.")
+
+    if stop_event and stop_event.is_set(): return
 
     pdf_base = split_temp if os.path.isdir(split_temp) else pasta_pdfs
 
@@ -149,14 +164,17 @@ def processar(
     pdf_unico_writer = PdfWriter() if pdf_unico else None
 
     for i, (ncte, grupo) in enumerate(grupos, start=1):
+        if stop_event and stop_event.is_set():
+            log_warn('Processamento interrompido pelo usuário')
+            if os.path.isdir(split_temp):
+                try: shutil.rmtree(split_temp)
+                except: pass
+            return 
+
         if progresso: progresso["value"] = i
         
         ncte_str = str(int(ncte))
-        
-        # --- MICRO-UPDATE: Rateio ---
         atualizar_status(f"Rateando CT-e {ncte_str} ({i}/{total_cte})")
-        # ----------------------------
-
         info_cte = mapa_cte.get(ncte_str)
 
         if not info_cte:
@@ -172,7 +190,7 @@ def processar(
         if not pdf:
             erros_pdf += 1
             lista_erros_pdf.append(ncte_str)
-            log_err(f"CT-e {ncte_str}: PDF ausente.")
+            log_err(f"CT-e {ncte_str}: PDF ausente (Não encontrado na varredura).")
             continue
 
         try:
@@ -199,7 +217,7 @@ def processar(
                         min(linhas, key=lambda x: x["valor"])["valor"] += diferenca
 
             if not linhas:
-                log_warn(f"CT-e {ncte_str}: Sem linhas válidas.")
+                log_warn(f"CT-e {ncte_str}: Sem linhas válidas na planilha.")
                 continue
 
             texto = [f"{l['prefixo']}: R$ {formato_brl(l['valor'])}" for l in linhas]
@@ -219,12 +237,14 @@ def processar(
             log_ok(f"CT-e {ncte_str} processado.")
 
         except Exception as e:
-            log_err(f"Erro CT-e {ncte_str}: {e}")
+            # MOSTRA O ERRO REAL NO LOG AGORA
+            trace = traceback.format_exc()
+            log_err(f"Erro CT-e {ncte_str}:\n{trace}")
 
     # =====================================================
     # FINALIZAÇÃO
     # =====================================================
-    if pdf_unico and pdf_unico_writer:
+    if pdf_unico and pdf_unico_writer and not (stop_event and stop_event.is_set()):
         atualizar_status("Gerando PDF Unificado.")
         from datetime import datetime
         ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
@@ -234,18 +254,20 @@ def processar(
         log_info(f"PDF Unificado: {nome}")
 
     if os.path.isdir(split_temp):
-        shutil.rmtree(split_temp, ignore_errors=True)
+        try: shutil.rmtree(split_temp, ignore_errors=True)
+        except: pass
+
+    tempo_total_seg = time.time() - tempo_inicial
+    minutos = int(tempo_total_seg // 60)
+    segundos = int(tempo_total_seg % 60)
+    
+    if minutos > 0:
+        texto_tempo = f'{minutos}m {segundos}s'
+    else:
+        texto_tempo = f'{round(tempo_total_seg,2)}s'
 
     atualizar_status("Processamento Concluído!")
     logger_func("-" * 30)
     log_ok(f"SUCESSO: {sucesso} | ERROS: {erros_chave + erros_pdf}")
     if cte_complemento_qtd: log_info(f"Complementos ignorados: {cte_complemento_qtd}")
-    tempo_total_seg = time.time() - tempo_inicial
-    minutos = int(tempo_total_seg//60)
-    segundos = int(tempo_total_seg % 60)
-
-    if minutos > 0:
-        texto_tempo = f'{minutos}:{segundos}'
-    else:
-        texto_tempo = f'{round(tempo_total_seg,2)} segundos '
     logger_func(f"⏱️ Tempo: {texto_tempo}")
