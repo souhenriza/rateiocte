@@ -2,12 +2,11 @@ import os
 import shutil
 import time
 from decimal import Decimal, ROUND_HALF_UP
-import pandas as pd
+from pandas import read_excel, groupby
 from PyPDF2 import PdfReader, PdfWriter
 import re
-import traceback  # <--- ESSENCIAL PARA VER O ERRO REAL
+import traceback 
 
-# Importações locais
 from .pdf_utils import (
     split_pdf_por_cte,
     localizar_pdf,
@@ -149,7 +148,7 @@ def processar(
     # =====================================================
     atualizar_status("Carregando Planilha Excel")
     try:
-        df = pd.read_excel(planilha)
+        df = read_excel(planilha)
         grupos = df.groupby("N° CT-e")
         total_cte = len(grupos)
         if progresso: progresso["maximum"] = total_cte
@@ -266,6 +265,9 @@ def processar(
     else:
         texto_tempo = f'{round(tempo_total_seg,2)}s'
 
+
+
+    print(mapa_cte)
     atualizar_status("Processamento Concluído!")
     logger_func("-" * 30)
     log_ok(f"SUCESSO: {sucesso} | ERROS: {erros_chave + erros_pdf}")

@@ -1,14 +1,14 @@
 import os
 import sys
 import subprocess
+from PyPDF2 import PdfReader, PdfWriter
+from pdf2image import convert_from_path
+from pyzbar.pyzbar import decode
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
 
-# ==============================================================================
-# PATCH ANTI-FLASH GLOBAL (CRUCIAL: TEM QUE SER A PRIMEIRA COISA)
-# ==============================================================================
-# Isso impede que QUALQUER subprocesso (incluindo o Poppler) crie janelas pretas.
-# Deve ser executado ANTES de 'from pdf2image import ...'
 if sys.platform == "win32":
-    # Salva a classe original para segurança
+
     _OriginalPopen = subprocess.Popen
 
     class PopenSemJanela(_OriginalPopen):
@@ -19,28 +19,20 @@ if sys.platform == "win32":
             startupinfo.wShowWindow = subprocess.SW_HIDE
             kwargs['startupinfo'] = startupinfo
             
-            # Adiciona a flag CREATE_NO_WINDOW (0x08000000)
-            creationflags = kwargs.get('creationflags', 0)
-            kwargs['creationflags'] = creationflags | 0x08000000 # CREATE_NO_WINDOW
             
-            # Redireciona saídas para o "limbo" para evitar erros de console inexistente
+            creationflags = kwargs.get('creationflags', 0)
+            kwargs['creationflags'] = creationflags | 0x08000000 
+            
             if 'stdin' not in kwargs: kwargs['stdin'] = subprocess.DEVNULL
             if 'stdout' not in kwargs: kwargs['stdout'] = subprocess.DEVNULL
             if 'stderr' not in kwargs: kwargs['stderr'] = subprocess.DEVNULL
             
             super().__init__(*args, **kwargs)
 
-    # Substitui a classe Popen padrão pela nossa versão silenciosa
     subprocess.Popen = PopenSemJanela
-# ==============================================================================
 
-# --- AGORA SIM, PODEMOS IMPORTAR AS BIBLIOTECAS ---
-# Como o Popen já foi hackeado acima, o pdf2image vai usar a versão silenciosa
-from PyPDF2 import PdfReader, PdfWriter
-from pdf2image import convert_from_path
-from pyzbar.pyzbar import decode
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4
+
+
 
 def get_poppler_path():
     """
@@ -126,7 +118,6 @@ def split_pdf_por_cte(pdf_entrada, pasta_saida, mapa_chaves, log, status_callbac
         log(f"❌ Erro leitura PDF {nome_pdf}: {e}")
         return
 
-    # Loop página a página
     for i in range(total_paginas):
         if stop_event and stop_event.is_set():
             if status_callback: status_callback("Interrompendo leitura...")
@@ -135,12 +126,11 @@ def split_pdf_por_cte(pdf_entrada, pasta_saida, mapa_chaves, log, status_callbac
         numero_real = i + 1
         
         if status_callback:
-            status_callback(f"Processando página {numero_real} de {total_paginas}...")
+            status_callback(f"Lendo página {numero_real} de {total_paginas}.")
 
         imagem_atual = renderizar_pagina_unica(pdf_entrada, numero_real, log)
         chave = extrair_chave_somente_barcode(imagem_atual, log)
         
-        # Libera memória imediatamente
         if imagem_atual:
             del imagem_atual 
 
@@ -152,6 +142,7 @@ def split_pdf_por_cte(pdf_entrada, pasta_saida, mapa_chaves, log, status_callbac
             writer = PdfWriter()
             writer.add_page(reader.pages[i])
             with open(destino, "wb") as f:
+                
                 writer.write(f)
 
 def localizar_pdf(pasta, chave):
@@ -164,9 +155,9 @@ def localizar_pdf(pasta, chave):
 def criar_overlay(texto_linhas, caminho_saida):
     c = canvas.Canvas(caminho_saida, pagesize=A4)
     width, height = A4
-    c.setFont("Helvetica-Bold", 10) # Fonte Corrigida
-    x = 50
-    y = height - 50 
+    c.setFont("Helvetica-Bold", 10) 
+    x = 410
+    y = 120
     c.setFillColorRGB(0, 0, 0)
     linhas = texto_linhas.split('\n')
     for linha in linhas:

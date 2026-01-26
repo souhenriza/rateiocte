@@ -1,10 +1,6 @@
-import re
+from re import sub
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-
-
-# =====================================================
-# CONVERSÃO MONETÁRIA
-# =====================================================
+import os
 
 def converter_moeda_para_decimal(valor):
     """
@@ -26,7 +22,7 @@ def converter_moeda_para_decimal(valor):
         return None
 
     s = s.replace("R$", "").replace(" ", "").replace("\xa0", "")
-    s = re.sub(r"[^\d\.,-]", "", s)
+    s = sub(r"[^\d\.,-]", "", s)
 
     if "," in s and "." in s:
         s = s.replace(".", "").replace(",", ".")
@@ -54,11 +50,6 @@ def formato_brl(valor):
     s = f"{valor:,.2f}"
     return s.replace(",", "X").replace(".", ",").replace("X", ".")
 
-
-# =====================================================
-# IDENTIFICAÇÃO DE OPERAÇÃO
-# =====================================================
-
 def identificar_prefixo_oper(operacao: str):
     """
     Identifica o prefixo da operação (V, B, A).
@@ -76,16 +67,6 @@ def identificar_prefixo_oper(operacao: str):
         return "A"
 
     return None
-
-
-# =====================================================
-# VERIFICAÇÕES DE TEXTO
-# =====================================================
-
-
-# =====================================================
-# AJUSTES DE VALOR
-# =====================================================
 
 def ajustar_por_arredondamento(linhas, diferenca, log=None):
     """
@@ -107,3 +88,16 @@ def ajustar_por_arredondamento(linhas, diferenca, log=None):
         )
 
     return True
+
+def plan_aberta(caminho):
+    if not caminho or not os.path.exists(caminho):
+        return True
+    
+    try:
+        with open(caminho, 'a'):
+            pass
+        return True
+    except IOError:
+        return False
+    
+

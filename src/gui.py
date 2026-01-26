@@ -1,5 +1,5 @@
 import os
-import time
+from time import time
 import threading
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
@@ -8,6 +8,7 @@ from PIL import Image
 # Importações do backend
 from .rateio import processar
 from . import config as cfg_mod
+from .generalsutils import plan_aberta
 
 # =====================================================
 # CONFIGURAÇÃO VISUAL E CONSTANTES
@@ -145,7 +146,6 @@ class RateioGUI:
         )
         self.btn_processar.pack(fill="x", padx=120, pady=5)
 
-        # --- STATUS DA FASE ---
         self.lbl_status = ctk.CTkLabel(
             self.main_frame,
             text="Aguardando início...",
@@ -154,7 +154,6 @@ class RateioGUI:
         )
         self.lbl_status.pack(fill="x", padx=50, pady=(15, 0))
 
-        # --- BARRA DE PROGRESSO ---
         self.progress_widget = ctk.CTkProgressBar(
             self.main_frame,
             orientation="horizontal",
@@ -165,7 +164,6 @@ class RateioGUI:
         self.progress_widget.pack(fill="x", padx=50, pady=(5, 10))
         self.progress_adapter = ProgressBarAdapter(self.progress_widget)
 
-        # --- ÁREA DE LOG (TERMINAL) ---
         ctk.CTkLabel(
             self.main_frame, 
             text="Log Detalhado:", 
@@ -179,13 +177,11 @@ class RateioGUI:
             height=150,
             fg_color=COR_LOG_BG,
             text_color=COR_LOG_TXT,
-            # 'Segoe UI Emoji' é crucial para exibir ✅ ❌ coloridos no Windows
             font=ctk.CTkFont(family="Segoe UI Emoji", size=12),
             corner_radius=8
         )
         self.log_box.pack(fill="both", expand=True, padx=50, pady=(0, 30))
-        
-        # Configuração de Cores para Tags do Log
+
         self.log_box.tag_config("sucesso", foreground= COR_LOG_TXT) # Verde Matrix
         self.log_box.tag_config("erro", foreground=COR_LOG_TXT)    # Vermelho Claro
         self.log_box.tag_config("aviso", foreground=COR_LOG_TXT)   # Laranja
@@ -193,9 +189,6 @@ class RateioGUI:
         
         self.log_box.configure(state="disabled")
 
-    # =====================================================
-    # MÉTODOS AUXILIARES DE UI
-    # =====================================================
     def _criar_campo(self, parent, texto, var, comando):
         frame = ctk.CTkFrame(parent, fg_color="transparent")
         frame.pack(fill="x", pady=6)
@@ -230,16 +223,13 @@ class RateioGUI:
             font=ctk.CTkFont(size=11)
         ).pack(side="right")
 
-    # =====================================================
-    # SISTEMA DE LOG E STATUS
-    # =====================================================
     def atualizar_status_fase(self, texto):
-        """Atualiza o label acima da barra e insere cabeçalho no log"""
+
         self.lbl_status.configure(text=texto)
         self.log_msg(f"{texto}", tag="fase")
 
     def log_msg(self, msg: str, tag=None):
-        """Insere mensagem no terminal com suporte a cores"""
+
         self.log_box.configure(state="normal")
         if tag:
             self.log_box.insert("end", f"{msg}\n", tag)
@@ -248,9 +238,6 @@ class RateioGUI:
         self.log_box.see("end")
         self.log_box.configure(state="disabled")
 
-    # =====================================================
-    # CONFIGURAÇÃO E PERSISTÊNCIA
-    # =====================================================
     def _carregar_config_gui(self):
         cfg = cfg_mod.carregar_config()
         self.v_planilha.set(cfg.get("planilha", ""))
@@ -266,9 +253,6 @@ class RateioGUI:
             "saida": self.v_saida.get()
         })
 
-    # =====================================================
-    # DIÁLOGOS DE SELEÇÃO
-    # =====================================================
     def sel_planilha(self):
         f = filedialog.askopenfilename(title="Selecionar Planilha", filetypes=[("Excel", "*.xlsx *.xls")])
         if f: self.v_planilha.set(f)
@@ -285,9 +269,6 @@ class RateioGUI:
         d = filedialog.askdirectory(title="Selecionar Pasta de Saída")
         if d: self.v_saida.set(d)
 
-    # =====================================================
-    # EXECUÇÃO (THREADING)
-    # =====================================================
     def acao_botao(self):
         if not self.processando:
             self.iniciar_processamento()
@@ -306,12 +287,19 @@ class RateioGUI:
             messagebox.showwarning("Atenção", "Preencha todos os campos obrigatórios.")
             return
 
+        planilha = self.v_planilha.get()
+        
+        if not plan_aberta(planilha):
+            messagebox.showerror(f'Arquivo Bloqueado!\nA planilha {os.path.basename(planilha)} pode estar aberta em algum computador')
+
+            return
+        
         self.processando = True
         self.stop_event.clear()
 
         self.btn_processar.configure(
             text="PARAR / CANCELAR", 
-            fg_color="#E43333",   # Vermelho
+            fg_color="#E43333",   
             hover_color="#D83030", 
             state="normal"       
         )
@@ -322,7 +310,7 @@ class RateioGUI:
         threading.Thread(target=self._processar_thread, daemon=True).start()
 
     def _processar_thread(self):
-        self.tempo_inicial = time.time()
+        self.tempo_inicial = time()
         try:
             processar(
                 planilha=self.v_planilha.get(),
@@ -339,7 +327,7 @@ class RateioGUI:
             self.log_msg(f"ERRO FATAL: {e}", tag="erro")
             self.lbl_status.configure(text="Erro na execução", text_color="red")
         finally:
-            self.tempo_final = time.time()
+            self.tempo_final = time()
             self.root.after(0, self.finalizar_processamento)
 
     def finalizar_processamento(self):
@@ -351,7 +339,7 @@ class RateioGUI:
 
         if self.stop_event.is_set():
             texto_status = "Cancelado pelo usuário"
-            cor_status = "#FF8800" # Laranja
+            cor_status = "#FF8800" 
             self.log_msg("❌ Processo abortado.", tag="erro")
             messagebox.showinfo("Cancelado", "O processamento foi interrompido.")
         else:
