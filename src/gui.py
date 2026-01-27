@@ -4,7 +4,7 @@ import threading
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 from PIL import Image
-
+from datetime import datetime
 # Importações do backend
 from .rateio import processar
 from . import config as cfg_mod
@@ -63,8 +63,8 @@ class RateioGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Sistema de Rateio de CT-e")
-        self.root.geometry("950x850")
-        self.root.minsize(850, 700)
+        self.root.geometry("850x650")
+        self.root.minsize(850, 600)
         self.root.configure(fg_color=COR_FUNDO_JANELA)
         
         # Variáveis de Controle
@@ -75,6 +75,7 @@ class RateioGUI:
         self.v_pdf_unico = ctk.BooleanVar(value=False)
         self.stop_event = threading.Event()
         self.processando = False
+        self.arquivo_log_atual = None
 
         # Carregar configurações salvas
         self._carregar_config_gui()
@@ -164,31 +165,6 @@ class RateioGUI:
         self.progress_widget.pack(fill="x", padx=50, pady=(5, 10))
         self.progress_adapter = ProgressBarAdapter(self.progress_widget)
 
-        ctk.CTkLabel(
-            self.main_frame, 
-            text="Log Detalhado:", 
-            anchor="w",
-            text_color=COR_TEXTO_PRINC,
-            font=ctk.CTkFont(size=12, weight="bold")
-        ).pack(fill="x", padx=50, pady=(5, 5))
-
-        self.log_box = ctk.CTkTextbox(
-            self.main_frame,
-            height=150,
-            fg_color=COR_LOG_BG,
-            text_color=COR_LOG_TXT,
-            font=ctk.CTkFont(family="Segoe UI Emoji", size=12),
-            corner_radius=8
-        )
-        self.log_box.pack(fill="both", expand=True, padx=50, pady=(0, 30))
-
-        self.log_box.tag_config("sucesso", foreground= COR_LOG_TXT) # Verde Matrix
-        self.log_box.tag_config("erro", foreground=COR_LOG_TXT)    # Vermelho Claro
-        self.log_box.tag_config("aviso", foreground=COR_LOG_TXT)   # Laranja
-        self.log_box.tag_config("fase", foreground=COR_LOG_TXT)    # Ciano (Títulos)
-        
-        self.log_box.configure(state="disabled")
-
     def _criar_campo(self, parent, texto, var, comando):
         frame = ctk.CTkFrame(parent, fg_color="transparent")
         frame.pack(fill="x", pady=6)
@@ -229,14 +205,14 @@ class RateioGUI:
         self.log_msg(f"{texto}", tag="fase")
 
     def log_msg(self, msg: str, tag=None):
+        if self.arquivo_log_atual:
+            try: 
+                with open(self.arquivo_log_atual, "a", encoding="utf-8") as f:
+                    hora = datetime.now().strftime("%H:%M:%S")
+                    f.write(f'[{hora}] {msg}\n')
 
-        self.log_box.configure(state="normal")
-        if tag:
-            self.log_box.insert("end", f"{msg}\n", tag)
-        else:
-            self.log_box.insert("end", f"{msg}\n")
-        self.log_box.see("end")
-        self.log_box.configure(state="disabled")
+            except Exception as e:
+                print('Erro ao salvar o log. Tipo de erro: {e}')
 
     def _carregar_config_gui(self):
         cfg = cfg_mod.carregar_config()
@@ -288,12 +264,27 @@ class RateioGUI:
             return
 
         planilha = self.v_planilha.get()
-        
+
         if not plan_aberta(planilha):
             messagebox.showerror(f'Arquivo Bloqueado!\nA planilha {os.path.basename(planilha)} pode estar aberta em algum computador')
 
             return
         
+        try: 
+            pasta_saida = self.v_saida.get()
+            timestamp = datetime.now().strftime('%d-%m-%Y - %H-%M-%S')
+            nome_log = f'Log_execucao_{timestamp}.txt'
+            self.arquivo_log_atual = os.path.join(pasta_saida, nome_log)
+
+            with open(self.arquivo_log_atual, 'w', encoding= 'UTF-8') as f:
+                f.write(f"=== RELATÓRIO DE PROCESSAMENTO DE CT-E ===\n")
+                f.write(f"Data: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n")
+                f.write(f"Planilha: {planilha}\n")
+                f.write(f"Pasta PDFs: {self.v_pdfs.get()}\n")
+                f.write("-" * 50 + "\n")
+            
+        except Exception as e:
+            messagebox.showerror("Erro de Permissão", f"Não foi possível criar o arquivo de log na pasta de saída.\nErro: {e}")
         self.processando = True
         self.stop_event.clear()
 
