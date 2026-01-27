@@ -1,11 +1,16 @@
 import os
-import sys
-import subprocess
-from PyPDF2 import PdfReader, PdfWriter
-from pdf2image import convert_from_path
+import fitz  # PyMuPDF
+from PIL import Image
 from pyzbar.pyzbar import decode
+from PyPDF2 import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
+import io
+import re
+import sys
+import subprocess
+
+
 
 if sys.platform == "win32":
 
@@ -32,72 +37,47 @@ if sys.platform == "win32":
     subprocess.Popen = PopenSemJanela
 
 
-
-
-def get_poppler_path():
-    """
-    Tenta localizar a pasta do Poppler automaticamente.
-    """
-    if getattr(sys, 'frozen', False):
-        base_dir = os.path.dirname(sys.executable)
-    else:
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-    caminhos_possiveis = [
-        os.path.join(base_dir, "poppler", "Library", "bin"), 
-        os.path.join(base_dir, "poppler", "bin"),           
-        os.path.join(base_dir, "poppler"),                  
-        os.path.join(base_dir, "assets", "poppler", "Library", "bin"), 
-        os.path.join(base_dir, "assets", "poppler", "bin"),
-    ]
-
-    for caminho in caminhos_possiveis:
-        if os.path.exists(caminho) and ("pdftoppm.exe" in os.listdir(caminho) or "pdftoppm" in os.listdir(caminho)):
-            return caminho
-    return None
-
-def renderizar_pagina_unica(pdf_path, numero_pagina, log_func=print):
-    """
-    Converte APENAS UMA página específica do PDF em imagem.
-    numero_pagina: Inteiro começando em 1.
-    """
-    path_poppler = get_poppler_path()
-    
+def renderizar_paginas(pdf_path, numero_pag_base):
     try:
-        if path_poppler:
-            imagens = convert_from_path(
-                pdf_path, 
-                dpi=300, 
-                first_page=numero_pagina, 
-                last_page=numero_pagina, 
-                poppler_path=path_poppler
-            )
-        else:
-            imagens = convert_from_path(
-                pdf_path, 
-                dpi=300, 
-                first_page=numero_pagina, 
-                last_page=numero_pagina
-            )
+        doc = fitz.open(pdf_path)
+
+        page_index = numero_pag_base - 1
+
+        if page_index < 0 or page_index >= len(doc):
+            return None
         
-        return imagens[0] if imagens else None
+        page = doc.load_page(page_index)
 
+        zoom = 3
+        
+        mat = fitz.Matrix(zoom, zoom)
+
+        pix = page.get_pixmap(matrix = mat)
+
+        img_data = pix.tobytes('png')
+        img_pil = Image.open(io.BytesIO(img_data))
+
+        doc.close()
+        return img_pil
     except Exception as e:
-        if "poppler" in str(e).lower():
-            log_func(f"❌ ERRO POPPLER: Não encontrado em {path_poppler}")
+        print(f'Erro PymuPDF {e}')
         return None
+    
 
-def extrair_chave_somente_barcode(imagem, log_func=print):
-    """Lê barcode/QR code da imagem e retorna a chave."""
-    if imagem is None: return None
-    try:
-        codigos = decode(imagem)
-        for code in codigos:
-            dados = code.data.decode("utf-8")
-            dados_limpos = dados.replace("CFe", "").strip()
-            if len(dados_limpos) == 44 and dados_limpos.isdigit():
+def extrair_chave_barcode(img_pil, log_func = print):
+
+    if img_pil is None: return None
+
+    try: 
+        codigos = decode(img_pil)
+
+        for code in codigos: 
+            dados = code.data.decode('utf-8')
+            dados_limpos = re.sub(r'\D', '', dados)
+
+            if len(dados_limpos) == 44:
                 return dados_limpos
-    except Exception:
+    except Exception as e:
         pass
     return None
 
@@ -128,11 +108,12 @@ def split_pdf_por_cte(pdf_entrada, pasta_saida, mapa_chaves, log, status_callbac
         if status_callback:
             status_callback(f"Lendo página {numero_real} de {total_paginas}.")
 
-        imagem_atual = renderizar_pagina_unica(pdf_entrada, numero_real, log)
-        chave = extrair_chave_somente_barcode(imagem_atual, log)
+        imagem = renderizar_paginas(pdf_entrada, numero_real)
+        chave = extrair_chave_barcode(imagem, log)
         
-        if imagem_atual:
-            del imagem_atual 
+        if imagem:
+            imagem.close()
+            del imagem 
 
         if chave and chave in mapa_chaves:
             destino = os.path.join(pasta_saida, f"{chave}-procCTe.pdf")
@@ -166,6 +147,7 @@ def criar_overlay(texto_linhas, caminho_saida):
     c.save()
 
 def sobrepor_pdf(pdf_original, pdf_overlay, pdf_saida):
+    """Cola a etiqueta em cima do PDF original"""
     reader_orig = PdfReader(pdf_original)
     reader_over = PdfReader(pdf_overlay)
     

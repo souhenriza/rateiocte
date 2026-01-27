@@ -6,6 +6,7 @@ from pandas import read_excel, Grouper
 from PyPDF2 import PdfReader, PdfWriter
 import re
 import traceback 
+import pandas as pd
 
 from .pdf_utils import (
     split_pdf_por_cte,
@@ -35,6 +36,7 @@ def processar(
     pasta_xml: str,
     pasta_saida: str,
     pdf_unico: bool,
+    mover_xml: bool,
     logger_func,
     status_func,
     progresso=None,
@@ -57,10 +59,16 @@ def processar(
     cte_complemento_qtd = 0
     lista_erros_chave = []
     lista_erros_pdf = []
+    dados_excel = []
 
-    # =====================================================
-    # FASE 1: INDEXAÇÃO DE XMLs
-    # =====================================================
+    def gerar_relatorio(cte, status, valor_xml = 0, valor_planilha = 0, msg = '', arquivos = ''):
+        dados_excel.append({'CTE': str(cte),
+                            'Status': status,
+                            'Valor XML': float(valor_xml) if valor_xml else 0.0,
+                            'Valor Planilha': float(valor_planilha) if valor_planilha else 0.0,
+                            'Diferença': float(valor_xml-valor_planilha) if valor_xml and valor_planilha else 0.0,
+                            'Mensagem': msg,
+                            'Arquivo Gerado': arquivos})
     atualizar_status("Iniciando varredura de XMLs")
     
     mapa_cte = {}
@@ -94,6 +102,7 @@ def processar(
             
             if (tipo != '0' or tem_tag_comp):
                 cte_complemento_qtd += 1
+                gerar_relatorio(numero_xml, 'Ignorado', msg = 'CTe Identificado como Complemento/Anulação')
                 continue
 
             if numero_xml in mapa_cte:
@@ -170,6 +179,8 @@ def processar(
                 except: pass
             return 
 
+
+        
         if progresso: progresso["value"] = i
         
         ncte_str = str(int(ncte))
@@ -180,6 +191,7 @@ def processar(
             erros_chave += 1
             lista_erros_chave.append(ncte_str)
             log_err(f"CT-e {ncte_str}: XML ausente.")
+            gerar_relatorio(numero_xml, 'Erro', msg = 'XML não encontrado na pasta')
             continue
 
         chave = info_cte['chave']
@@ -190,6 +202,7 @@ def processar(
             erros_pdf += 1
             lista_erros_pdf.append(ncte_str)
             log_err(f"CT-e {ncte_str}: PDF ausente (Não encontrado na varredura).")
+            gerar_relatorio(numero_xml, 'Erro', msg = 'PDF não encontrado ou código não legível')
             continue
 
         try:
@@ -208,15 +221,19 @@ def processar(
                     linhas.append({"prefixo": prefixo, "valor": base})
                     valores.append(base)
 
+
+            soma_planilha = sum(valores).quantize(Decimal('0.01'), rounding =ROUND_HALF_UP) if valores else Decimal('0.00')
+
             if valor_cte:
-                soma = sum(valores).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                diferenca = (valor_cte - soma).quantize(Decimal("0.01"))
+                diferenca = (valor_cte - soma_planilha).quantize(Decimal("0.01"))
                 if diferenca != Decimal("0.00") and abs(diferenca) <= Decimal("0.01"):
                     if linhas:
                         min(linhas, key=lambda x: x["valor"])["valor"] += diferenca
+                        soma_planilha += diferenca
 
             if not linhas:
                 log_warn(f"CT-e {ncte_str}: Sem linhas válidas na planilha.")
+                gerar_relatorio(numero_xml, 'Erro', msg = 'Nenhuma linha válida encontrada')
                 continue
 
             texto = [f"{l['prefixo']}: R$ {formato_brl(l['valor'])}" for l in linhas]
@@ -234,11 +251,31 @@ def processar(
 
             sucesso += 1
             log_ok(f"CT-e {ncte_str} processado.")
+            
+            gerar_relatorio(numero_xml,
+                             'Sucesso', 
+                             valor_xml= valor_cte, 
+                             valor_planilha = soma_planilha, 
+                             msg= 'Processado com Sucesso!', 
+                             arquivos= nome_final)
+            
+            if mover_xml and xml_path and os.path.exists(xml_path):
+                try:
+                    pasta_processados = os.path.join(os.path.dirname(xml_path), "XML Processados")
+                    os.makedirs(pasta_processados, exist_ok=True)
+
+                    nome_arquivo = os.path.basename(xml_path)
+                    destino_xml = os.path.join(pasta_processados, nome_arquivo)
+
+                    shutil.move(xml_path, destino_xml)
+
+                except Exception as e_move:
+                    log_warn(f"Não foi possível mover o XML: {e_move}")
 
         except Exception as e:
-            # MOSTRA O ERRO REAL NO LOG AGORA
             trace = traceback.format_exc()
             log_err(f"Erro CT-e {ncte_str}:\n{trace}")
+            gerar_relatorio(ncte_str, 'Erro Crítico', msg = 'str{e}')
 
     # =====================================================
     # FINALIZAÇÃO
@@ -255,6 +292,20 @@ def processar(
     if os.path.isdir(split_temp):
         try: shutil.rmtree(split_temp, ignore_errors=True)
         except: pass
+
+    if dados_excel:
+        atualizar_status('Gerando arquivo Excel')
+        try:
+            ts = datetime.now().strftime('%Y-%m-%d %H-%M-%S')
+            nome_excel = f'Relatório_Rateio{ts}.xlsx'
+            caminho_excel = os.path.join(pasta_saida, nome_excel)
+
+
+            df_rel = pd.DataFrame(dados_excel)
+            df_rel.to_excel(caminho_excel, index = False)
+            log_info(f'Arquivo Excel Gerado: {nome_excel}')
+        except Exception as f:
+            log_err(f'Não foi possível salvar o arquivo {nome_excel}\nNºErr: {f}')
 
     tempo_total_seg = time.time() - tempo_inicial
     minutos = int(tempo_total_seg // 60)

@@ -133,6 +133,19 @@ class RateioGUI:
             border_color="#9CA3AF"
         ).pack(pady=15)
 
+
+        self.v_mover_xml = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(
+            self.main_frame,
+            text="Mover XMLs processados para a pasta de saída",
+            variable=self.v_mover_xml,
+            font=ctk.CTkFont(size=13),
+            text_color=COR_TEXTO_PRINC,
+            hover_color=LARANJA_ADIMAX,
+            fg_color=LARANJA_ADIMAX,
+            border_color="#9CA3AF"
+        ).pack(pady=(0,15))
+
         # --- BOTÃO DE AÇÃO ---
         self.btn_processar = ctk.CTkButton(
             self.main_frame,
@@ -309,6 +322,7 @@ class RateioGUI:
                 pasta_xml=self.v_xml.get(),
                 pasta_saida=self.v_saida.get(),
                 pdf_unico=self.v_pdf_unico.get(),
+                mover_xml=self.v_mover_xml.get(),
                 logger_func=self.log_msg,              
                 status_func=self.atualizar_status_fase, 
                 progresso=self.progress_adapter,
